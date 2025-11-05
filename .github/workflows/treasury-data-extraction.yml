@@ -1,0 +1,106 @@
+name: Treasury Data Extraction
+
+on:
+  # Scheduled run: First day of every month at 9 AM UTC
+  schedule:
+    - cron: '0 9 1 * *'
+
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      fiscal_years:
+        description: 'Fiscal years to extract (comma-separated, e.g., FY2022,FY2023,FY2024)'
+        required: false
+        default: ''
+
+  # Trigger on push to main branch (for testing)
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'src/**'
+      - '.github/workflows/treasury-data-extraction.yml'
+
+jobs:
+  extract-treasury-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Treasury data extraction
+        id: extract
+        run: |
+          if [ -n "${{ github.event.inputs.fiscal_years }}" ]; then
+            python src/treasury_extractor.py --years "${{ github.event.inputs.fiscal_years }}"
+          else
+            python src/treasury_extractor.py
+          fi
+        continue-on-error: false
+
+      - name: Upload Excel Report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: treasury-report-${{ github.run_number }}
+          path: outputs/*.xlsx
+          retention-days: 90
+
+      - name: Upload Visualizations
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: treasury-visualizations-${{ github.run_number }}
+          path: outputs/*.png
+          retention-days: 90
+
+      - name: Upload Metadata
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: treasury-metadata-${{ github.run_number }}
+          path: outputs/*.json
+          retention-days: 90
+
+      - name: Create summary
+        if: success()
+        run: |
+          echo "## 🏛️ Treasury Data Extraction Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Outputs Generated" >> $GITHUB_STEP_SUMMARY
+          echo "- Excel reports: $(ls outputs/*.xlsx 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- Visualizations: $(ls outputs/*.png 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- Metadata files: $(ls outputs/*.json 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📥 Download Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "All reports and visualizations are available in the **Artifacts** section above." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📅 Extraction Details" >> $GITHUB_STEP_SUMMARY
+          echo "- Workflow run: \`${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Triggered by: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Timestamp: \`$(date -u)\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "## ❌ Treasury Data Extraction Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The extraction process encountered an error. Please check the logs above for details." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Common Issues:" >> $GITHUB_STEP_SUMMARY
+          echo "- API unavailable or rate limited" >> $GITHUB_STEP_SUMMARY
+          echo "- Requested fiscal year data not yet available" >> $GITHUB_STEP_SUMMARY
+          echo "- Network connectivity issues" >> $GITHUB_STEP_SUMMARY
