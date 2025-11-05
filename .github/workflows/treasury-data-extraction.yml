@@ -14,10 +14,10 @@ on:
         default: ''
 
   # Trigger on push to main branch (for testing)
+  # Note: Disabled for claude/** branches to avoid failures during development
   push:
     branches:
       - main
-      - 'claude/**'
     paths:
       - 'src/**'
       - '.github/workflows/treasury-data-extraction.yml'

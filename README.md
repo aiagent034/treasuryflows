@@ -226,17 +226,41 @@ DEFAULT_FISCAL_YEARS = {
 
 ## 🐛 Troubleshooting
 
-### Issue: No data retrieved
+### Issue: GitHub Actions workflow failed
+
+**Common causes**:
+- API rate limiting (HTTP 403) - too many requests in short time
+- Network connectivity from GitHub to Treasury API
+- Fiscal year data not yet available
+
+**Solutions**:
+1. **Wait and retry**: GitHub's IP may be temporarily rate-limited. Try again in 15-30 minutes.
+2. **Manual trigger with fewer years**: Go to Actions → Run workflow → Enter `FY2023,FY2024` instead of all 5 years
+3. **Check workflow logs**: Look for specific error messages (403, 404, timeout)
+4. **Test API connectivity**: Run `python src/test_api.py` locally to verify API is accessible
+
+### Issue: No data retrieved (local)
 
 **Possible causes**:
 - Fiscal year data not yet available (e.g., FY 2025 before Sept 30, 2025)
-- API temporarily unavailable
+- API temporarily unavailable or rate limited
 - Network connectivity issues
+- Firewall blocking requests
 
 **Solution**:
-- Check if the fiscal year has ended
-- Try again later
-- Check API status at https://fiscaldata.treasury.gov/
+```bash
+# Test API connectivity first
+python src/test_api.py
+
+# Try with a single recent year
+python src/treasury_extractor.py --years FY2023
+
+# Wait 5 minutes and try again (rate limiting)
+sleep 300 && python src/treasury_extractor.py --years FY2023
+
+# Check API status
+curl -I https://fiscaldata.treasury.gov/
+```
 
 ### Issue: Import errors
 

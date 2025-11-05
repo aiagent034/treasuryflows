@@ -87,6 +87,15 @@ class TreasuryDataExtractor:
                         print(f"  ⚠️  No data available for {fiscal_year} (date may not exist yet)")
                         return pd.DataFrame()
 
+                    if response.status_code == 403:
+                        print(f"  ⚠️  Access restricted for {fiscal_year} (HTTP 403)")
+                        print(f"     This may be due to:")
+                        print(f"     - API rate limiting")
+                        print(f"     - Temporary access restrictions")
+                        print(f"     - Network/firewall blocking")
+                        print(f"     Skipping {fiscal_year}...")
+                        return pd.DataFrame()
+
                     if response.status_code != 200:
                         print(f"  ❌ Error: HTTP {response.status_code}")
                         if page == 1:
@@ -160,11 +169,22 @@ class TreasuryDataExtractor:
             print("="*70)
             print("\nPossible reasons:")
             print("  1. Network connectivity issues")
-            print("  2. API is temporarily unavailable")
+            print("  2. API is temporarily unavailable or rate limited (HTTP 403)")
             print("  3. Requested fiscal year data may not be available yet")
-            print("\nTry again later or check API status at:")
-            print("  https://fiscaldata.treasury.gov/")
+            print("  4. Firewall or security restrictions blocking access")
+            print("\nRecommendations:")
+            print("  - Try again in a few minutes (rate limiting)")
+            print("  - Test with a single recent year: --years FY2023")
+            print("  - Check API status: https://fiscaldata.treasury.gov/")
+            print("  - Run the test script: python src/test_api.py")
             return False
+
+        # Report partial success if some years failed
+        years_requested = len(self.fiscal_years)
+        years_retrieved = len(self.all_data)
+        if years_retrieved < years_requested:
+            print(f"\n⚠️  Warning: Retrieved {years_retrieved} of {years_requested} requested fiscal years")
+            print(f"   Some years may not be available yet or encountered access restrictions")
 
         return True
 
