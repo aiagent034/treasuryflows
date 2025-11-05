@@ -60,12 +60,13 @@ class TreasuryDataExtractor:
         all_records = []
         page_number = 1
         max_retries = 3
+        MAX_PAGES = 10  # SAFETY LIMIT: Absolute maximum pages to prevent infinite loops
 
         # Create session with connection pooling
         session = requests.Session()
 
         # Pagination loop - keep fetching until we're told to stop
-        while True:
+        while page_number <= MAX_PAGES:  # SAFETY: Force stop after MAX_PAGES
             params = {
                 "filter": f"record_date:eq:{date_str}",
                 "format": "json",
@@ -139,14 +140,29 @@ class TreasuryDataExtractor:
             if page_number >= total_pages:
                 break  # Stop pagination - we're done!
 
+            # SAFETY CHECK: Detect if we're stuck fetching the same page
+            if len(all_records) > (page_number * 1000 * 2):
+                print(f"  ⚠️  WARNING: Possible pagination loop detected, stopping")
+                break
+
             # Move to next page
             page_number += 1
             time.sleep(0.5)  # Delay between pages
 
+        # Check if we hit the safety limit
+        if page_number > MAX_PAGES:
+            print(f"  ⚠️  WARNING: Hit maximum page limit ({MAX_PAGES}), stopping pagination")
+
         session.close()
 
         if all_records:
+            # Remove duplicates that may have been fetched multiple times
             df = pd.DataFrame(all_records)
+            initial_count = len(df)
+            df = df.drop_duplicates()
+            final_count = len(df)
+            if initial_count != final_count:
+                print(f"  ⚠️  Removed {initial_count - final_count} duplicate records")
             print(f"  ✅ Retrieved {len(df)} total records for {fiscal_year}")
             return df
 
