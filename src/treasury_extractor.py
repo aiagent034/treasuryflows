@@ -221,8 +221,13 @@ class TreasuryDataExtractor:
         # Combine all years
         combined = pd.concat(self.all_data, ignore_index=True)
 
+        # DEBUG: Print available columns
+        print(f"\n🔍 Available columns in API response:")
+        print(f"   {list(combined.columns)}")
+
         # Convert amounts to numeric
         amount_columns = [col for col in combined.columns if 'amt' in col.lower()]
+        print(f"\n💰 Amount columns found: {amount_columns}")
         for col in amount_columns:
             combined[col] = pd.to_numeric(combined[col], errors='coerce')
 
@@ -237,9 +242,30 @@ class TreasuryDataExtractor:
             )
             combined['main_department'] = combined['main_department'].str.strip()
 
+        # Determine the amount column to use
+        # Try common column names in order of preference
+        amount_col = None
+        possible_amount_cols = ['fiscal_year_amt', 'transaction_today_amt', 'today_amt', 'amount']
+        for col in possible_amount_cols:
+            if col in combined.columns:
+                amount_col = col
+                print(f"✅ Using amount column: '{amount_col}'")
+                break
+
+        # If none of the expected columns exist, use the first column with 'amt' in it
+        if amount_col is None and amount_columns:
+            amount_col = amount_columns[0]
+            print(f"⚠️  Using detected amount column: '{amount_col}'")
+
+        if amount_col is None:
+            raise ValueError("No amount column found in API response. Available columns: " + str(list(combined.columns)))
+
+        # Store amount_col as instance variable for use in other methods
+        self.amount_col = amount_col
+
         # Create detailed view
         detail_cols = ['fiscal_year', 'record_date', 'account_type', 'transaction_type',
-                       'main_department', 'fiscal_year_amt']
+                       'main_department', amount_col]
 
         # Add transaction_catg if it exists
         if 'transaction_catg' in combined.columns:
@@ -251,12 +277,12 @@ class TreasuryDataExtractor:
         # Create department summary (aggregated by main department)
         dept_summary = combined.groupby(
             ['fiscal_year', 'main_department', 'account_type']
-        )['fiscal_year_amt'].sum().reset_index()
+        )[amount_col].sum().reset_index()
 
         dept_pivot = dept_summary.pivot_table(
             index=['main_department', 'account_type'],
             columns='fiscal_year',
-            values='fiscal_year_amt',
+            values=amount_col,
             fill_value=0
         )
 
@@ -275,12 +301,12 @@ class TreasuryDataExtractor:
         # Create transaction-level summary
         transaction_summary = combined.groupby(
             ['fiscal_year', 'transaction_type', 'account_type']
-        )['fiscal_year_amt'].sum().reset_index()
+        )[amount_col].sum().reset_index()
 
         transaction_pivot = transaction_summary.pivot_table(
             index=['transaction_type', 'account_type'],
             columns='fiscal_year',
-            values='fiscal_year_amt',
+            values=amount_col,
             fill_value=0
         )
 
@@ -300,7 +326,7 @@ class TreasuryDataExtractor:
             # 1. Top Departments by Total Amount (Deposits)
             print("  Creating: Top Departments - Deposits...")
             deposits = detailed[detailed['account_type'] == 'Deposits']
-            top_dept_deposits = deposits.groupby('main_department')['fiscal_year_amt'].sum().sort_values(ascending=False).head(10)
+            top_dept_deposits = deposits.groupby('main_department')[self.amount_col].sum().sort_values(ascending=False).head(10)
 
             fig, ax = plt.subplots(figsize=(12, 8))
             top_dept_deposits.plot(kind='barh', ax=ax, color='#2E7D32')
@@ -319,7 +345,7 @@ class TreasuryDataExtractor:
             # 2. Top Departments by Total Amount (Withdrawals)
             print("  Creating: Top Departments - Withdrawals...")
             withdrawals = detailed[detailed['account_type'] == 'Withdrawals']
-            top_dept_withdrawals = withdrawals.groupby('main_department')['fiscal_year_amt'].sum().sort_values(ascending=False).head(10)
+            top_dept_withdrawals = withdrawals.groupby('main_department')[self.amount_col].sum().sort_values(ascending=False).head(10)
 
             fig, ax = plt.subplots(figsize=(12, 8))
             top_dept_withdrawals.plot(kind='barh', ax=ax, color='#C62828')
@@ -337,13 +363,13 @@ class TreasuryDataExtractor:
 
             # 3. Year-over-Year Trends (Top 5 Departments)
             print("  Creating: Year-over-Year Trends...")
-            top_5_depts = deposits.groupby('main_department')['fiscal_year_amt'].sum().sort_values(ascending=False).head(5).index
+            top_5_depts = deposits.groupby('main_department')[self.amount_col].sum().sort_values(ascending=False).head(5).index
 
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
             # Deposits trend
             for dept in top_5_depts:
-                dept_data = deposits[deposits['main_department'] == dept].groupby('fiscal_year')['fiscal_year_amt'].sum()
+                dept_data = deposits[deposits['main_department'] == dept].groupby('fiscal_year')[self.amount_col].sum()
                 ax1.plot(dept_data.index, dept_data.values, marker='o', linewidth=2, label=dept[:30])
 
             ax1.set_xlabel('Fiscal Year', fontsize=12)
@@ -354,9 +380,9 @@ class TreasuryDataExtractor:
             ax1.grid(True, alpha=0.3)
 
             # Withdrawals trend
-            top_5_withdrawal_depts = withdrawals.groupby('main_department')['fiscal_year_amt'].sum().sort_values(ascending=False).head(5).index
+            top_5_withdrawal_depts = withdrawals.groupby('main_department')[self.amount_col].sum().sort_values(ascending=False).head(5).index
             for dept in top_5_withdrawal_depts:
-                dept_data = withdrawals[withdrawals['main_department'] == dept].groupby('fiscal_year')['fiscal_year_amt'].sum()
+                dept_data = withdrawals[withdrawals['main_department'] == dept].groupby('fiscal_year')[self.amount_col].sum()
                 ax2.plot(dept_data.index, dept_data.values, marker='o', linewidth=2, label=dept[:30])
 
             ax2.set_xlabel('Fiscal Year', fontsize=12)
@@ -376,7 +402,7 @@ class TreasuryDataExtractor:
 
             # 4. Total Deposits vs Withdrawals by Year
             print("  Creating: Deposits vs Withdrawals Comparison...")
-            yearly_summary = detailed.groupby(['fiscal_year', 'account_type'])['fiscal_year_amt'].sum().unstack(fill_value=0)
+            yearly_summary = detailed.groupby(['fiscal_year', 'account_type'])[self.amount_col].sum().unstack(fill_value=0)
 
             fig, ax = plt.subplots(figsize=(12, 7))
             x = range(len(yearly_summary.index))
@@ -411,7 +437,7 @@ class TreasuryDataExtractor:
 
                 if yoy_cols:
                     # Get top 10 departments by total amount
-                    top_10 = detailed.groupby('main_department')['fiscal_year_amt'].sum().sort_values(ascending=False).head(10).index
+                    top_10 = detailed.groupby('main_department')[self.amount_col].sum().sort_values(ascending=False).head(10).index
 
                     heatmap_data = dept_summary.loc[top_10][yoy_cols] if isinstance(dept_summary.index, pd.MultiIndex) else pd.DataFrame()
 
@@ -494,8 +520,8 @@ class TreasuryDataExtractor:
                 stats_data = []
                 for fy in years_retrieved:
                     fy_data = detailed[detailed['fiscal_year'] == fy]
-                    deposits = fy_data[fy_data['account_type'] == 'Deposits']['fiscal_year_amt'].sum()
-                    withdrawals = fy_data[fy_data['account_type'] == 'Withdrawals']['fiscal_year_amt'].sum()
+                    deposits = fy_data[fy_data['account_type'] == 'Deposits'][self.amount_col].sum()
+                    withdrawals = fy_data[fy_data['account_type'] == 'Withdrawals'][self.amount_col].sum()
                     net = deposits - withdrawals
 
                     stats_data.append({
@@ -548,8 +574,8 @@ class TreasuryDataExtractor:
         print(f"\n💰 Financial Summary by Fiscal Year:")
         for fy in years_retrieved:
             fy_data = detailed[detailed['fiscal_year'] == fy]
-            deposits = fy_data[fy_data['account_type'] == 'Deposits']['fiscal_year_amt'].sum()
-            withdrawals = fy_data[fy_data['account_type'] == 'Withdrawals']['fiscal_year_amt'].sum()
+            deposits = fy_data[fy_data['account_type'] == 'Deposits'][self.amount_col].sum()
+            withdrawals = fy_data[fy_data['account_type'] == 'Withdrawals'][self.amount_col].sum()
             net = deposits - withdrawals
 
             print(f"\n  {fy}:")
