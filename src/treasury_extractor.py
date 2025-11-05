@@ -60,8 +60,12 @@ class TreasuryDataExtractor:
         all_records = []
         page = 1
         max_retries = 3
+        total_pages = 1  # Initialize
 
-        while True:
+        # Create session with connection pooling
+        session = requests.Session()
+
+        while True:  # Pagination loop
             params = {
                 "filter": f"record_date:eq:{date_str}",
                 "format": "json",
@@ -73,10 +77,13 @@ class TreasuryDataExtractor:
                 "User-Agent": "Mozilla/5.0 (compatible; TreasuryDataAnalyzer/1.0)"
             }
 
+            # Retry logic for this specific page
             retry_count = 0
+            success = False
+
             while retry_count < max_retries:
                 try:
-                    response = requests.get(
+                    response = session.get(
                         BASE_URL,
                         params=params,
                         headers=headers,
@@ -85,6 +92,7 @@ class TreasuryDataExtractor:
 
                     if response.status_code == 404:
                         print(f"  ⚠️  No data available for {fiscal_year} (date may not exist yet)")
+                        session.close()
                         return pd.DataFrame()
 
                     if response.status_code == 403:
@@ -94,12 +102,15 @@ class TreasuryDataExtractor:
                         print(f"     - Temporary access restrictions")
                         print(f"     - Network/firewall blocking")
                         print(f"     Skipping {fiscal_year}...")
+                        session.close()
                         return pd.DataFrame()
 
                     if response.status_code != 200:
                         print(f"  ❌ Error: HTTP {response.status_code}")
                         if page == 1:
+                            session.close()
                             return pd.DataFrame()
+                        # For pages > 1, return what we have so far
                         break
 
                     data = response.json()
@@ -107,23 +118,29 @@ class TreasuryDataExtractor:
                     if 'data' not in data or len(data['data']) == 0:
                         if page == 1:
                             print(f"  ⚠️  No records found for {fiscal_year}")
+                        # No more data, exit pagination loop
+                        success = True
                         break
 
                     all_records.extend(data['data'])
 
-                    # Check pagination
+                    # Check pagination metadata
                     meta = data.get('meta', {})
                     total_pages = meta.get('total-pages', 1)
                     total_count = meta.get('total-count', len(all_records))
 
                     print(f"  📄 Page {page}/{total_pages} - {len(data['data'])} records (Total: {len(all_records)}/{total_count})")
 
+                    # Successfully fetched this page
+                    success = True
+
+                    # Check if we've fetched all pages
                     if page >= total_pages:
+                        # All pages fetched, exit pagination loop
                         break
 
-                    page += 1
-                    time.sleep(0.3)  # Be respectful to the API
-                    break  # Success, exit retry loop
+                    # More pages to fetch
+                    break  # Exit retry loop, continue to next page
 
                 except requests.exceptions.RequestException as e:
                     retry_count += 1
@@ -131,14 +148,32 @@ class TreasuryDataExtractor:
                     if retry_count < max_retries:
                         time.sleep(2 ** retry_count)  # Exponential backoff
                     else:
+                        print(f"  ❌ Max retries exceeded for page {page}")
                         if page == 1:
+                            session.close()
                             return pd.DataFrame()
+                        # Return what we have so far
+                        success = False
                         break
                 except Exception as e:
                     print(f"  ❌ Unexpected error: {e}")
                     if page == 1:
+                        session.close()
                         return pd.DataFrame()
+                    # Return what we have so far
+                    success = False
                     break
+
+            # After retry loop, check if we should continue pagination
+            if not success or page >= total_pages:
+                # Either failed or finished all pages
+                break
+
+            # Move to next page
+            page += 1
+            time.sleep(0.5)  # Increased delay between pages
+
+        session.close()
 
         if all_records:
             df = pd.DataFrame(all_records)
